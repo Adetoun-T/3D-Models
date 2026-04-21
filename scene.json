@@ -1,0 +1,60 @@
+{
+  "splats": [
+    {
+      "filename": "city-street-with-storefronts.spz",
+      "transform": {
+        "translation": [
+          0,
+          3.699,
+          0
+        ],
+        "rotation": [
+          151.96867275179744,
+          0,
+          0
+        ],
+        "quaternion": [
+          0.97,
+          0,
+          0,
+          0.242
+        ],
+        "scale": 6.301
+      }
+    }
+  ],
+  "meshes": [
+    {
+      "filename": "object_0-2glb.glb",
+      "originalFilename": "object_0 (2).glb",
+      "mimeType": "model/gltf-binary",
+      "transform": {
+        "translation": [
+          -0.02,
+          3.95,
+          -6.87
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "quaternion": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          8,
+          8,
+          8
+        ]
+      }
+    }
+  ],
+  "metadata": {
+    "exportTimestamp": "2026-04-08T03:57:36.187Z",
+    "spzExportVersion": 3
+  }
+}
