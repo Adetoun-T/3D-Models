@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Spark • Goat Scene with Positional Audio</title>
+  <style>
+    body {
+      margin: 0;
+    }
+
+    canvas {
+      touch-action: none;
+    }
+
+    #audio-prompt {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.65);
+      color: #fff;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-family: sans-serif;
+      font-size: 14px;
+      pointer-events: none;
+      z-index: 100;
+      transition: opacity 0.5s;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="audio-prompt">Click or tap anywhere to enable positional audio</div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdnjs.cloudflare.com/ajax/libs/three.js/0.180.0/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
+        "lil-gui": "https://cdn.jsdelivr.net/npm/lil-gui@0.20.0/+esm",
+        "@sparkjsdev/spark": "./spark.module.min.js"
+      }
+    }
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/stats.js@0.17.0/build/stats.min.js"></script>
+  <script type="module">
+    import * as THREE from "three";
+    import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+    import { SparkRenderer, SplatMesh, SparkControls, SparkXr, textSplats, dyno, utils } from "@sparkjsdev/spark";
+    import GUI from "lil-gui";
+
+    const RENDER_TIMEOUT_MS = 5 * 1000;
+    const URL_BASE = ".";
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 1000);
+    const renderer = new THREE.WebGLRenderer();
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    const localFrame = new THREE.Group();
+    scene.add(localFrame);
+
+    const spark = new SparkRenderer({
+      renderer,
+      maxStdDev: Math.sqrt(5),
+    });
+    scene.add(spark);
+    localFrame.add(camera);
+
+    // --- Positional Audio Setup ---
+    // AudioListener must be attached to the camera so the listener position
+    // and orientation track with the viewer as they move around the scene.
+    const audioListener = new THREE.AudioListener();
+    camera.add(audioListener);
+
+    // PositionalAudio emits sound from a fixed point in world space.
+    // We anchor it to an invisible Object3D placed at the lamb/goat splat
+    // position so the volume and panning respond to camera distance/angle.
+    const audioSource = new THREE.PositionalAudio(audioListener);
+    audioSource.setRefDistance(2);       // full volume within ~2 units
+    audioSource.setRolloffFactor(1.5);   // how quickly volume falls off beyond refDistance
+    audioSource.setDistanceModel("inverse");
+    audioSource.setLoop(true);
+
+    const audioAnchor = new THREE.Object3D();
+    // Match the lamb splat's translation from scene.json
+    audioAnchor.position.set(0, 1.443278431892395, 0);
+    audioAnchor.add(audioSource);
+    scene.add(audioAnchor);
+
+    const audioLoader = new THREE.AudioLoader();
+    audioLoader.load(`${URL_BASE}/goat_sounds.wav`, (buffer) => {
+      audioSource.setBuffer(buffer);
+    });
+
+    // Browsers require a user gesture before any AudioContext can start.
+    // We resume the context on the first click/tap and hide the prompt.
+    const audioPrompt = document.getElementById("audio-prompt");
+    function startAudio() {
+      if (audioListener.context.state === "suspended") {
+        audioListener.context.resume();
+      }
+      if (!audioSource.isPlaying && audioSource.buffer) {
+        audioSource.play();
+      } else if (!audioSource.isPlaying) {
+        // Buffer may still be loading — play once it arrives
+        audioLoader.load(`${URL_BASE}/goat_sounds.wav`, (buffer) => {
+          audioSource.setBuffer(buffer);
+          audioSource.play();
+        });
+      }
+      audioPrompt.style.opacity = "0";
+      setTimeout(() => { audioPrompt.style.display = "none"; }, 500);
+      document.removeEventListener("click", startAudio);
+      document.removeEventListener("touchend", startAudio);
+    }
+    document.addEventListener("click", startAudio);
+    document.addEventListener("touchend", startAudio);
+    // --- End Positional Audio Setup ---
+
+    const stats = new Stats();
+    document.body.appendChild(stats.dom);
+
+    const gui = new GUI({ title: "Settings" });
+
+    const scene_json = await fetch(`${URL_BASE}/scene.json`).then((response) => response.json());
+    const splats = scene_json.splats ?? [];
+    const meshes = scene_json.meshes ?? [];
+
+    // Load splats
+    for (const splat of splats) {
+      const splatMesh = new SplatMesh({ url: `${URL_BASE}/${splat.filename}`, lod: true });
+      splatMesh.position.fromArray(splat.transform?.translation ?? [0, 0, 0]);
+      splatMesh.quaternion.fromArray(splat.transform?.quaternion ?? [0, 0, 0, 1]);
+      const scale = splat.transform?.scale ?? 1;
+      splatMesh.scale.set(scale, scale, scale);
+      scene.add(splatMesh);
+    }
+
+    function extractAlbedoProperties(material) {
+      let color = new THREE.Color(0x888888);
+      let map = null;
+      if (material.color instanceof THREE.Color) {
+        color = material.color.clone();
+      }
+      if (material.map) {
+        map = material.map;
+      }
+      return { color, map };
+    }
+
+    function convertToBasicMaterials(object) {
+      object.traverse((child) => {
+        if (child.isMesh) {
+          const originalMaterial = child.material;
+          const originalMaterials = Array.isArray(originalMaterial)
+            ? originalMaterial
+            : [originalMaterial];
+
+          if (originalMaterials.length === 0) {
+            child.material = new THREE.MeshBasicMaterial({
+              color: 0x888888,
+              side: THREE.DoubleSide,
+            });
+          } else {
+            const newMaterials = originalMaterials.map((mat) => {
+              const { color, map } = extractAlbedoProperties(mat);
+              return new THREE.MeshBasicMaterial({
+                color: color,
+                map: map,
+                side: THREE.DoubleSide,
+              });
+            });
+            child.material = newMaterials.length === 1 ? newMaterials[0] : newMaterials;
+          }
+        }
+      });
+    }
+
+    const gltfLoader = new GLTFLoader();
+    for (const mesh of meshes) {
+      try {
+        const gltf = await gltfLoader.loadAsync(`${URL_BASE}/${mesh.filename}`);
+        const model = gltf.scene;
+        convertToBasicMaterials(model);
+        model.position.fromArray(mesh.transform?.translation ?? [0, 0, 0]);
+        model.quaternion.fromArray(mesh.transform?.quaternion ?? [0, 0, 0, 1]);
+        const meshScale = mesh.transform?.scale ?? [1, 1, 1];
+        model.scale.set(meshScale[0], meshScale[1], meshScale[2]);
+        scene.add(model);
+      } catch (error) {
+        console.warn(`Failed to load mesh: ${mesh.filename}`, error);
+      }
+    }
+
+    window.THREE = THREE;
+    window.scene = scene;
+    window.renderer = renderer;
+
+    window.addEventListener("resize", onWindowResize, false);
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    let renderEnabled = true;
+    let lastMoved = 0;
+    let lastPos = new THREE.Vector3().setScalar(Number.NEGATIVE_INFINITY);
+    let lastDir = new THREE.Vector3();
+
+    const controls = new SparkControls({
+      canvas: renderer.domElement,
+    });
+    controls.pointerControls.reverseRotate = utils.isMobile();
+    gui.add(controls.pointerControls, "reverseRotate").name("Reverse look").listen();
+    controls.pointerControls.rotateSpeed *= 2.0;
+    controls.pointerControls.slideSpeed *= 0.75;
+
+    const xr = new SparkXr({
+      renderer,
+      onMouseLeaveOpacity: 0.5,
+      onReady: async (supported) => {
+        console.log(`SparkXr initialized: XR ${supported ? "supported" : "not supported"}`);
+      },
+      onEnterXr: () => { console.log("Enter XR"); },
+      onExitXr: () => { console.log("Exit XR"); },
+      controllers: {},
+    });
+
+    gui.add(spark, "lodSplatScale", 0.001, 3.0, 0.001);
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "\\") {
+        const cameraPos = camera.getWorldPosition(new THREE.Vector3());
+        const cameraQuat = camera.getWorldQuaternion(new THREE.Quaternion());
+        console.log("camera position: ", JSON.stringify(cameraPos.toArray()), "quaternion: ", JSON.stringify(cameraQuat.toArray()));
+      }
+    });
+
+    let lastTime = 0;
+
+    renderer.setAnimationLoop(function animate(time, xrFrame) {
+      stats.begin();
+
+      const deltaTime = time - (lastTime || time);
+      lastTime = time;
+
+      xr.updateControllers(camera);
+      controls.update(localFrame, camera);
+
+      const now = performance.now();
+      const dir = localFrame.getWorldDirection(new THREE.Vector3());
+      if ((localFrame.position.distanceTo(lastPos) > 0.0001) || (dir.dot(lastDir) < 0.9999)) {
+        lastMoved = now;
+        renderEnabled = true;
+        lastPos.copy(localFrame.position);
+        lastDir.copy(dir);
+      }
+      if ((now - lastMoved) > RENDER_TIMEOUT_MS) {
+        renderEnabled = false;
+      }
+
+      if (renderEnabled) {
+        renderer.render(scene, camera);
+      }
+
+      stats.end();
+    });
+  </script>
+</body>
+
+</html>
