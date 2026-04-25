@@ -1,0 +1,15 @@
+# Audio
+*.mp3
+*.wav
+*.ogg
+*.aac
+*.flac
+
+# 3D models
+*.glb
+*.gltf
+
+# Gaussian splat files
+*.spz
+*.ply
+*.splat
