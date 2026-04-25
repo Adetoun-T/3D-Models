@@ -1,0 +1,7 @@
+# Media assets — kept out of version control due to file size
+*.wav
+*.mp3
+*.ogg
+*.spz
+*.glb
+*.gltf
