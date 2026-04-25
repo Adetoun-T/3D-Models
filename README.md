@@ -1,3 +1,11 @@
+# Each piece of the 3D Model Assignment are in different branches.
+Drawn- Hand-Drawn Scene
+
+Ferb- Fantasy Scene
+
+Goat- Photorealistic Scene
+
+
 # Scene Viewer
 
 A standalone viewer for your exported Marble scene, powered by [SparkJS](https://sparkjs.dev).
